@@ -1,75 +1,81 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'home_screen.dart';
+import '../screens/home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
   @override
-  _SplashScreenState createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+
   @override
   void initState() {
     super.initState();
-    _navigateToHome();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeIn)
+    );
+    
+    _animationController.forward();
+    
+    Timer(const Duration(seconds: 3), () {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
+      );
+    });
   }
 
-  _navigateToHome() async {
-    await Future.delayed(Duration(seconds: 3));
-    Navigator.pushReplacement(
-      context, 
-      MaterialPageRoute(builder: (context) => HomeScreen())
-    );
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF2A3990), Color(0xFF0B0B45)],
+      backgroundColor: Theme.of(context).colorScheme.background,
+      body: Center(
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.remove_red_eye_outlined,
+                size: 100,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Bridge Cheat Detector',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'YOLO & Eye Blink Detection',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Theme.of(context).colorScheme.secondary,
+                ),
+              ),
+              const SizedBox(height: 50),
+              const CircularProgressIndicator(),
+            ],
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Eye animation
-            Container(
-              height: 200,
-              width: 200,
-              child: Lottie.network(
-                'https://lottie.host/08d30b8a-5207-4b33-a9ee-4d574158329d/l6fwECLPdQ.json',
-                fit: BoxFit.contain,
-              ),
-            ),
-            SizedBox(height: 30),
-            Text(
-              'Bridge Cheat Detector',
-              style: GoogleFonts.poppins(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            SizedBox(height: 10),
-            Text(
-              'YOLO Eye Blink Detection',
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                color: Colors.white70,
-              ),
-            ),
-            SizedBox(height: 50),
-            CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-            ),
-          ],
         ),
       ),
     );

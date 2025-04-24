@@ -1,190 +1,88 @@
+import 'dart:math';
+
 class TimestampAnalyzer {
-  // Threshold untuk padrões suspeitos de comunicação
-  static const double PATTERN_SIMILARITY_THRESHOLD = 0.2; // 20% de tolerância
-  static const int MIN_SEQUENCE_LENGTH = 3; // Comprimento mínimo de sequência para considerar um padrão
-  
-  // Detectar padrões rítmicos nos timestamps
-  static bool detectRhythmicPattern(List<int> timestamps) {
-    if (timestamps.length < MIN_SEQUENCE_LENGTH + 1) {
-      return false;
+  // Analyze patterns in timestamps
+  Map<String, dynamic> analyzeBlinkPattern(List<Map<String, dynamic>> blinkEvents) {
+    if (blinkEvents.isEmpty) {
+      return {
+        'count': 0,
+        'rate': 0.0,
+        'pattern': 'No blinks detected',
+        'suspicious': false
+      };
     }
     
-    // Calcular intervalos entre timestamps
-    List<int> intervals = [];
-    for (int i = 1; i < timestamps.length; i++) {
-      intervals.add(timestamps[i] - timestamps[i-1]);
+    // Calculate time span
+    final firstTimestamp = blinkEvents.first['timestamp'] as int;
+    final lastTimestamp = blinkEvents.last['timestamp'] as int;
+    final timeSpanMs = (lastTimestamp - firstTimestamp).toDouble();
+    
+    // Calculate blink rate (blinks per minute)
+    final count = blinkEvents.length;
+    final blinkRate = timeSpanMs > 0 ? (count / (timeSpanMs / 60000)) : 0.0;
+    
+    // Analyze intervals between blinks
+    final intervals = <int>[];
+    for (int i = 1; i < blinkEvents.length; i++) {
+      final interval = blinkEvents[i]['timestamp'] - blinkEvents[i-1]['timestamp'];
+      intervals.add(interval);
     }
     
-    // Verificar padrões rítmicos
-    return _checkConsistentIntervals(intervals) || 
-           _checkAlternatingPattern(intervals) ||
-           _checkMorseCodeLikePattern(intervals);
+    // Calculate statistics for intervals
+    final stats = _calculateStatistics(intervals);
+    
+    // Determine pattern type
+    String pattern = 'Normal';
+    bool suspicious = false;
+    
+    // Check for suspicious patterns
+    if (count > 0) {
+      if (blinkRate > 50) {
+        pattern = 'Rapid blinking';
+        suspicious = true;
+      } else if (blinkRate < 5 && timeSpanMs > 30000) { // Less than 5 blinks per minute over 30+ seconds
+        pattern = 'Very infrequent blinking';
+        suspicious = true;
+      } else if (stats['cv']! < 0.2 && intervals.length >= 3) { // Low coefficient of variation = rhythmic pattern
+        pattern = 'Rhythmic blinking';
+        suspicious = true;
+      } else if (stats['cv']! > 1.0) { // High coefficient of variation = erratic pattern
+        pattern = 'Erratic blinking';
+        suspicious = false; // This is actually common in normal behavior
+      }
+    }
+    
+    return {
+      'count': count,
+      'rate': blinkRate,
+      'avgInterval': stats['mean'],
+      'stdDevInterval': stats['stdDev'],
+      'pattern': pattern,
+      'suspicious': suspicious
+    };
   }
   
-  // Verificar se há uma sequência consistente de intervalos similares
-  static bool _checkConsistentIntervals(List<int> intervals) {
-    if (intervals.length < MIN_SEQUENCE_LENGTH) return false;
-    
-    int consistentCount = 1;
-    double averageInterval = intervals[0].toDouble();
-    
-    for (int i = 1; i < intervals.length; i++) {
-      double variation = (intervals[i] - averageInterval).abs() / averageInterval;
-      
-      if (variation <= PATTERN_SIMILARITY_THRESHOLD) {
-        consistentCount++;
-        // Atualizar média para maior precisão
-        averageInterval = (averageInterval * consistentCount + intervals[i]) / (consistentCount + 1);
-      } else {
-        consistentCount = 1;
-        averageInterval = intervals[i].toDouble();
-      }
-      
-      if (consistentCount >= MIN_SEQUENCE_LENGTH) {
-        return true;
-      }
+  // Calculate statistics for a list of values
+  Map<String, double> _calculateStatistics(List<int> values) {
+    if (values.isEmpty) {
+      return {'mean': 0.0, 'stdDev': 0.0, 'cv': 0.0};
     }
     
-    return false;
-  }
-  
-  // Verificar padrões alternados (curto-longo-curto-longo)
-  static bool _checkAlternatingPattern(List<int> intervals) {
-    if (intervals.length < MIN_SEQUENCE_LENGTH + 1) return false;
+    // Calculate mean
+    final sum = values.reduce((a, b) => a + b);
+    final mean = sum / values.length;
     
-    List<double> ratios = [];
-    for (int i = 1; i < intervals.length; i++) {
-      ratios.add(intervals[i] / intervals[i-1]);
+    // Calculate standard deviation
+    double sumSquaredDiff = 0;
+    for (final value in values) {
+      sumSquaredDiff += pow(value - mean, 2);
     }
+    final variance = sumSquaredDiff / values.length;
+    final stdDev = sqrt(variance);
     
-    // Identificar padrões como alternância entre curto e longo
-    int consistentAlternations = 1;
-    for (int i = 1; i < ratios.length; i++) {
-      // Para alternância, esperamos que ratio[i] ~= 1/ratio[i-1]
-      double expectedRatio = 1 / ratios[i-1];
-      double variation = (ratios[i] - expectedRatio).abs() / expectedRatio;
-      
-      if (variation <= PATTERN_SIMILARITY_THRESHOLD * 2) { // Tolerância um pouco maior
-        consistentAlternations++;
-      } else {
-        consistentAlternations = 1;
-      }
-      
-      if (consistentAlternations >= MIN_SEQUENCE_LENGTH - 1) {
-        return true;
-      }
-    }
+    // Calculate coefficient of variation (CV)
+    final cv = mean > 0 ? stdDev / mean : 0.0;
     
-    return false;
-  }
-  
-  // Detectar padrões semelhantes ao código Morse
-  static bool _checkMorseCodeLikePattern(List<int> intervals) {
-    if (intervals.length < 5) return false; // Precisa de mais pontos para detectar Morse
-    
-    // Separar intervalos em grupos (curtos e longos)
-    Map<String, List<int>> groups = _groupIntervals(intervals);
-    
-    // Se encontrarmos dois grupos claros (curto e longo)
-    if (groups.length == 2) {
-      List<String> pattern = _convertToPattern(intervals, groups);
-      
-      // Verificar por sequências repetitivas no padrão
-      return _checkRepeatedSubsequence(pattern);
-    }
-    
-    return false;
-  }
-  
-  // Agrupar intervalos similares (para detecção de Morse)
-  static Map<String, List<int>> _groupIntervals(List<int> intervals) {
-    Map<String, List<int>> groups = {};
-    
-    for (int interval in intervals) {
-      bool grouped = false;
-      
-      for (String groupKey in groups.keys) {
-        int groupAvg = groups[groupKey]!.reduce((a, b) => a + b) ~/ groups[groupKey]!.length;
-        double variation = (interval - groupAvg).abs() / groupAvg;
-        
-        if (variation <= PATTERN_SIMILARITY_THRESHOLD) {
-          groups[groupKey]!.add(interval);
-          grouped = true;
-          break;
-        }
-      }
-      
-      if (!grouped) {
-        // Criar novo grupo
-        groups['group_${groups.length}'] = [interval];
-      }
-    }
-    
-    return groups;
-  }
-  
-  // Converter intervalos em padrão (ex: "SLLSLS" para curto-longo-longo-curto...)
-  static List<String> _convertToPattern(List<int> intervals, Map<String, List<int>> groups) {
-    List<String> keys = groups.keys.toList();
-    int avg1 = groups[keys[0]]!.reduce((a, b) => a + b) ~/ groups[keys[0]]!.length;
-    int avg2 = groups[keys[1]]!.reduce((a, b) => a + b) ~/ groups[keys[1]]!.length;
-    
-    String shortKey = avg1 < avg2 ? keys[0] : keys[1];
-    String longKey = avg1 < avg2 ? keys[1] : keys[0];
-    
-    List<String> pattern = [];
-    for (int interval in intervals) {
-      int avg1 = groups[keys[0]]!.reduce((a, b) => a + b) ~/ groups[keys[0]]!.length;
-      double variation1 = (interval - avg1).abs() / avg1;
-      
-      int avg2 = groups[keys[1]]!.reduce((a, b) => a + b) ~/ groups[keys[1]]!.length;
-      double variation2 = (interval - avg2).abs() / avg2;
-      
-      if (variation1 <= variation2) {
-        pattern.add(keys[0] == shortKey ? 'S' : 'L');
-      } else {
-        pattern.add(keys[1] == shortKey ? 'S' : 'L');
-      }
-    }
-    
-    return pattern;
-  }
-  
-  // Verificar por subsequências repetidas
-  static bool _checkRepeatedSubsequence(List<String> pattern) {
-    if (pattern.length < 6) return false;
-    
-    // Procurar por subsequências de 2-4 elementos que se repetem
-    for (int length = 2; length <= 4; length++) {
-      if (pattern.length < length * 2) continue;
-      
-      for (int i = 0; i <= pattern.length - length * 2; i++) {
-        List<String> subseq = pattern.sublist(i, i + length);
-        
-        // Procurar por repetições desta subsequência
-        int matches = 0;
-        for (int j = i + length; j <= pattern.length - length; j += length) {
-          bool isMatch = true;
-          for (int k = 0; k < length; k++) {
-            if (pattern[j + k] != subseq[k]) {
-              isMatch = false;
-              break;
-            }
-          }
-          
-          if (isMatch) {
-            matches++;
-            if (matches >= 1) { // Encontrada pelo menos uma repetição
-              return true;
-            }
-          } else {
-            // Se não for match, pular para o próximo índice após este
-            break;
-          }
-        }
-      }
-    }
-    
-    return false;
+    return {'mean': mean, 'stdDev': stdDev, 'cv': cv};
   }
 }

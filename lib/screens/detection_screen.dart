@@ -1,396 +1,234 @@
+import 'package:bridge_cheat_detector/utils/ear_calculator.dart' as utils;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'dart:async';
+import '../widgets/camera_view.dart';
+import '../widgets/result_display.dart';
+import '../models/blink_detection.dart';
+import '../models/anomaly_detection.dart';
 import '../services/yolo_service.dart';
 import '../utils/ear_calculator.dart';
-import '../models/blink_detection.dart';
-import 'dart:async';
-import 'dart:io';
 
 class DetectionScreen extends StatefulWidget {
+  const DetectionScreen({super.key});
+
   @override
-  _DetectionScreenState createState() => _DetectionScreenState();
+  State<DetectionScreen> createState() => _DetectionScreenState();
 }
 
 class _DetectionScreenState extends State<DetectionScreen> with WidgetsBindingObserver {
   CameraController? _cameraController;
-  late YoloService _yoloService;
-  late EarCalculator _earCalculator;
-  late BlinkDetector _blinkDetector;
-  
+  List<CameraDescription>? _cameras;
   bool _isDetecting = false;
-  bool _isCameraInitialized = false;
-  List<Map<String, dynamic>> _detectionResults = [];
-  List<Map<String, dynamic>> _blinkHistory = [];
+  bool _isInitialized = false;
+  int _selectedCameraIndex = 0;
+  final YoloService _yoloService = YoloService();
+  final utils.EARCalculator _earCalculator = utils.EARCalculator();
+  final BlinkDetection _blinkDetection = BlinkDetection();
+  final AnomalyDetection _anomalyDetection = AnomalyDetection();
+  List<Map<String, dynamic>> _blinkEvents = [];
+  bool _isModelLoaded = false;
   
-  double _earValue = 0.0;
-  int _blinkCount = 0;
-  bool _showEyePoints = true;
+  Timer? _processingTimer;
   
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initializeCamera();
-    _initializeDetection();
+    _loadModel();
   }
   
-  void _initializeDetection() async {
-    _yoloService = YoloService();
-    await _yoloService.loadModel();
-    
-    _earCalculator = EarCalculator();
-    _blinkDetector = BlinkDetector(
-      earThreshold: 0.2,
-      onBlinkDetected: (timestamp) {
-        setState(() {
-          _blinkCount++;
-          _blinkHistory.add({
-            'timestamp': timestamp,
-            'duration': 0.3, // exemplo, em segundos
-          });
-        });
-        
-        // Analisar padrões de piscadas
-        _analyzeBlinkPatterns();
-      }
-    );
-  }
-  
-  Future<void> _initializeCamera() async {
-    final cameras = await availableCameras();
-    final frontCamera = cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.front,
-      orElse: () => cameras.first,
-    );
-    
-    _cameraController = CameraController(
-      frontCamera,
-      ResolutionPreset.medium,
-      enableAudio: false,
-      imageFormatGroup: Platform.isAndroid 
-          ? ImageFormatGroup.yuv420 
-          : ImageFormatGroup.bgra8888,
-    );
-    
-    await _cameraController!.initialize();
-    
-    if (mounted) {
+  Future<void> _loadModel() async {
+    try {
+      await _yoloService.loadModel();
       setState(() {
-        _isCameraInitialized = true;
+        _isModelLoaded = true;
       });
-      
-      _startDetection();
+    } catch (e) {
+      debugPrint('Failed to load model: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load detection model: $e')),
+      );
+    }
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      _cameras = await availableCameras();
+      if (_cameras != null && _cameras!.isNotEmpty) {
+        _cameraController = CameraController(
+          _cameras![_selectedCameraIndex],
+          ResolutionPreset.medium,
+          enableAudio: false,
+          imageFormatGroup: ImageFormatGroup.yuv420,
+        );
+        
+        await _cameraController!.initialize();
+        
+        setState(() {
+          _isInitialized = true;
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No cameras found')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error initializing camera: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Camera initialization error: $e')),
+      );
     }
   }
   
+  void _toggleDetection() {
+    if (_isDetecting) {
+      _stopDetection();
+    } else {
+      _startDetection();
+    }
+    
+    setState(() {
+      _isDetecting = !_isDetecting;
+    });
+  }
+  
   void _startDetection() {
-    if (_cameraController != null) {
-      _isDetecting = true;
-      
-      _cameraController!.startImageStream((CameraImage image) async {
-        if (!_isDetecting) return;
-        
-        try {
-          final results = await _yoloService.detectEyes(image);
-          
-          if (results.isNotEmpty) {
-            // Calcular EAR se os olhos foram detectados
-            final earValue = _earCalculator.calculateEAR(results);
-            
-            // Detectar piscadas
-            _blinkDetector.processEAR(earValue, DateTime.now().millisecondsSinceEpoch);
-            
-            setState(() {
-              _detectionResults = results;
-              _earValue = earValue;
-            });
-          }
-        } catch (e) {
-          print('Error in detection: $e');
-        }
-      });
+    if (_cameraController != null && _isModelLoaded) {
+      _processingTimer = Timer.periodic(const Duration(milliseconds: 100), () {
+        _processFrame();
+      } as void Function(Timer timer));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Camera or model not ready')),
+      );
     }
   }
   
   void _stopDetection() {
-    _isDetecting = false;
-    _cameraController?.stopImageStream();
+    _processingTimer?.cancel();
+    _blinkEvents.clear();
   }
   
-  void _analyzeBlinkPatterns() {
-    // Implementar lógica de análise de padrões aqui
-    // Por exemplo, verificar sequências, ritmos ou frequências específicas
-    
-    if (_blinkHistory.length < 2) return;
-    
-    // Calcular intervalos entre piscadas
-    List<int> intervals = [];
-    for (int i = 1; i < _blinkHistory.length; i++) {
-      int interval = _blinkHistory[i]['timestamp'] - _blinkHistory[i-1]['timestamp'];
-      intervals.add(interval);
-    }
-    
-    // Detectar padrões suspeitos
-    // Exemplo simplificado: padrões rítmicos
-    bool suspiciousPattern = _detectRhythmicPattern(intervals);
-    
-    if (suspiciousPattern) {
-      // Atualizar UI para mostrar alerta
-      print('Padrão suspeito detectado!');
-    }
-  }
-  
-  bool _detectRhythmicPattern(List<int> intervals) {
-    // Exemplo simplificado de detecção de padrão
-    if (intervals.length < 3) return false;
-    
-    // Verificar se há sequência de intervalos similares
-    // (implementação simplificada para exemplo)
-    int similarCount = 0;
-    for (int i = 1; i < intervals.length; i++) {
-      if ((intervals[i] - intervals[i-1]).abs() < 100) { // 100ms de tolerância
-        similarCount++;
-      }
-    }
-    
-    return similarCount >= 2; // Pelo menos 3 intervalos similares
-  }
-  
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
+  Future<void> _processFrame() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
     
+    try {
+      final image = await _cameraController!.takePicture();
+      
+      // Process with YOLO
+      final detectionResults = await _yoloService.detectObjects(image.path);
+      
+      // Calculate EAR 
+      final earValue = _earCalculator.calculateEAR(detectionResults);
+      
+      // Detect blinks
+      final blinkDetected = _blinkDetection.detectBlink(earValue);
+      
+      if (blinkDetected) {
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        _blinkEvents.add({
+          'timestamp': timestamp,
+          'ear': earValue,
+        });
+        
+        // Check for anomalies
+        final isAnomalous = _anomalyDetection.detectAnomaly(_blinkEvents);
+        
+        if (isAnomalous) {
+          // Handle anomaly detection
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Suspicious blink pattern detected!'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+        
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error processing frame: $e');
+    }
+  }
+  
+  void _switchCamera() {
+    if (_cameras == null || _cameras!.isEmpty) return;
+    
+    _selectedCameraIndex = (_selectedCameraIndex + 1) % _cameras!.length;
+    _disposeCurrentCamera();
+    _initializeCamera();
+  }
+  
+  Future<void> _disposeCurrentCamera() async {
+    if (_cameraController != null) {
+      await _cameraController!.dispose();
+      _cameraController = null;
+    }
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive) {
       _stopDetection();
-      _cameraController?.dispose();
+      _disposeCurrentCamera();
     } else if (state == AppLifecycleState.resumed) {
       _initializeCamera();
+      if (_isDetecting) {
+        _startDetection();
+      }
     }
   }
   
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _stopDetection();
-    _cameraController?.dispose();
-    _yoloService.dispose();
+    _disposeCurrentCamera();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
-  
+
   @override
   Widget build(BuildContext context) {
-    if (!_isCameraInitialized) {
-      return Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-    
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        iconTheme: IconThemeData(color: Colors.white),
-        title: Text(
-          'Deteksi Kedipan Mata',
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF2A3990), Color(0xFF2A3990).withOpacity(0.7)],
-            ),
-          ),
-        ),
+        title: const Text('Detection'),
         actions: [
           IconButton(
-            icon: Icon(_showEyePoints ? Icons.visibility : Icons.visibility_off),
-            onPressed: () {
-              setState(() {
-                _showEyePoints = !_showEyePoints;
-              });
-            },
+            icon: const Icon(Icons.flip_camera_ios),
+            onPressed: _switchCamera,
           ),
         ],
       ),
-      extendBodyBehindAppBar: true,
       body: Column(
         children: [
           Expanded(
-            child: Stack(
-              children: [
-                // Camera preview
-                Container(
-                  width: double.infinity,
-                  child: CameraPreview(_cameraController!),
-                ),
-                
-                // Detection overlay
-                if (_showEyePoints && _detectionResults.isNotEmpty)
-                  CustomPaint(
-                    size: Size(
-                      MediaQuery.of(context).size.width,
-                      MediaQuery.of(context).size.width * _cameraController!.value.aspectRatio,
-                    ),
-                    painter: EyeDetectionPainter(
-                      _detectionResults,
-                      boxColor: Colors.green,
-                      pointColor: Colors.red,
-                    ),
-                  ),
-              ],
-            ),
+            flex: 3,
+            child: _isInitialized
+                ? CameraView(controller: _cameraController!)
+                : const Center(child: CircularProgressIndicator()),
           ),
-          
-          // Detection results
-          Container(
-            padding: EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Color(0xFF2A3990),
-            ),
-            child: Column(
-              children: [
-                // EAR value and blink counter
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildInfoCard(
-                      'EAR Value',
-                      _earValue.toStringAsFixed(3),
-                      Icons.remove_red_eye,
-                    ),
-                    _buildInfoCard(
-                      'Blink Count',
-                      _blinkCount.toString(),
-                      Icons.visibility_off,
-                    ),
-                  ],
-                ),
-                SizedBox(height: 16),
-                
-                // Detection status
-                Text(
-                  _earValue < 0.2 ? 'Kedipan Terdeteksi!' : 'Monitoring...',
-                  style: GoogleFonts.poppins(
-                    color: _earValue < 0.2 ? Colors.red : Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
-                  ),
-                ),
-                
-                // Pattern recognition status if enough blinks
-                if (_blinkHistory.length > 3)
-                  Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: Text(
-                      _detectRhythmicPattern(_blinkHistory.map((b) => b['timestamp'] as int).toList().sublist(1))
-                          ? 'Pola Mencurigakan Terdeteksi!'
-                          : 'Tidak Ada Pola Mencurigakan',
-                      style: GoogleFonts.poppins(
-                        color: _detectRhythmicPattern(_blinkHistory.map((b) => b['timestamp'] as int).toList().sublist(1))
-                            ? Colors.red
-                            : Colors.green,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-              ],
+          Expanded(
+            flex: 2,
+            child: ResultDisplay(
+              blinkEvents: _blinkEvents,
+              isAnomalous: _blinkEvents.isNotEmpty && 
+                  _anomalyDetection.detectAnomaly(_blinkEvents),
             ),
           ),
         ],
       ),
-    );
-  }
-  
-  Widget _buildInfoCard(String title, String value, IconData icon) {
-    return Container(
-      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 20),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(10),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _toggleDetection,
+        backgroundColor: _isDetecting ? Colors.red : Colors.green,
+        child: Icon(_isDetecting ? Icons.stop : Icons.play_arrow),
       ),
-      child: Column(
-        children: [
-          Icon(
-            icon,
-            color: Colors.white,
-            size: 20,
-          ),
-          SizedBox(height: 5),
-          Text(
-            title,
-            style: GoogleFonts.poppins(
-              color: Colors.white70,
-              fontSize: 12,
-            ),
-          ),
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
-  }
-}
-
-class EyeDetectionPainter extends CustomPainter {
-  final List<Map<String, dynamic>> detections;
-  final Color boxColor;
-  final Color pointColor;
-  
-  EyeDetectionPainter(this.detections, {required this.boxColor, required this.pointColor});
-  
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint boxPaint = Paint()
-      ..color = boxColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-      
-    final Paint pointPaint = Paint()
-      ..color = pointColor
-      ..style = PaintingStyle.fill;
-    
-    for (var detection in detections) {
-      // Draw bounding box
-      final Rect rect = Rect.fromLTRB(
-        detection['rect'][0] * size.width,
-        detection['rect'][1] * size.height,
-        detection['rect'][2] * size.width,
-        detection['rect'][3] * size.height,
-      );
-      canvas.drawRect(rect, boxPaint);
-      
-      // Draw eye landmarks
-      if (detection.containsKey('landmarks')) {
-        for (var landmark in detection['landmarks']) {
-          final Offset point = Offset(
-            landmark[0] * size.width,
-            landmark[1] * size.height,
-          );
-          canvas.drawCircle(point, 2.0, pointPaint);
-        }
-      }
-    }
-  }
-  
-  @override
-  bool shouldRepaint(EyeDetectionPainter oldDelegate) {
-    return oldDelegate.detections != detections;
   }
 }

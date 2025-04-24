@@ -1,167 +1,221 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'detection_screen.dart';
+import '../screens/detection_screen.dart';
 
 class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF2A3990), Color(0xFF0B0B45)],
+      appBar: AppBar(
+        title: const Text('Bridge Cheat Detector'),
+        centerTitle: true,
+        elevation: 0,
+      ),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(context),
+              const SizedBox(height: 24),
+              _buildFeatureCards(context),
+              const SizedBox(height: 24),
+              _buildInfoSection(context),
+            ],
           ),
         ),
-        child: SafeArea(
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const DetectionScreen()),
+          );
+        },
+        label: const Text('Start Detection'),
+        icon: const Icon(Icons.camera_alt),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Welcome to Bridge Cheat Detector',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Using AI to detect cheating in bridge card games through eye blink pattern analysis',
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeatureCards(BuildContext context) {
+    final features = [
+      {
+        'icon': Icons.visibility,
+        'title': 'Eye Detection',
+        'description': 'Detect eyes using YOLOv8 object detection'
+      },
+      {
+        'icon': Icons.remove_red_eye,
+        'title': 'Blink Analysis',
+        'description': 'Calculate Eye Aspect Ratio (EAR) to detect blinks'
+      },
+      {
+        'icon': Icons.warning_amber,
+        'title': 'Anomaly Detection',
+        'description': 'Identify suspicious blinking patterns'
+      },
+    ];
+
+    return GridView.count(
+      crossAxisCount: 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 16,
+      crossAxisSpacing: 16,
+      childAspectRatio: 1.1,
+      children: features.map((feature) {
+        return Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.all(16.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                SizedBox(height: 20),
+                Icon(
+                  feature['icon'] as IconData,
+                  size: 40,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(height: 12),
                 Text(
-                  'Bridge Cheat Detector',
-                  style: GoogleFonts.poppins(
-                    fontSize: 28,
+                  feature['title'] as String,
+                  style: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    fontSize: 16,
                   ),
                 ),
-                SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(
-                  'Deteksi kecurangan pada permainan kartu bridge menggunakan teknologi YOLO dan Eye Blink Detection',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    color: Colors.white70,
+                  feature['description'] as String,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.secondary,
                   ),
                 ),
-                SizedBox(height: 40),
-                
-                // Cara kerja section
-                Text(
-                  'Cara Kerja',
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                SizedBox(height: 15),
-                
-                _buildFeatureCard(
-                  context,
-                  icon: Icons.remove_red_eye,
-                  title: 'Deteksi Mata',
-                  description: 'Menggunakan YOLO untuk mendeteksi dan melacak posisi mata pemain',
-                ),
-                
-                _buildFeatureCard(
-                  context,
-                  icon: Icons.visibility_off,
-                  title: 'Deteksi Kedipan',
-                  description: 'Menghitung Eye Aspect Ratio (EAR) untuk mendeteksi kedipan mata',
-                ),
-                
-                _buildFeatureCard(
-                  context,
-                  icon: Icons.timeline,
-                  title: 'Analisis Pola',
-                  description: 'Menganalisis pola kedipan untuk mengidentifikasi kode komunikasi',
-                ),
-                
-                Spacer(),
-                
-                // Start Detection button
-                Container(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => DetectionScreen()),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Color(0xFF2A3990),
-                      padding: EdgeInsets.symmetric(vertical: 15),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      'Mulai Deteksi',
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 30),
               ],
             ),
           ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildInfoSection(BuildContext context) {
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'How It Works',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            _buildStepItem(
+              context, 
+              '1', 
+              'Camera captures player\'s face in real-time'
+            ),
+            _buildStepItem(
+              context, 
+              '2', 
+              'YOLO detects and tracks eye regions'
+            ),
+            _buildStepItem(
+              context, 
+              '3', 
+              'EAR algorithm calculates if eyes are open or closed'
+            ),
+            _buildStepItem(
+              context, 
+              '4', 
+              'Timestamp analyzer logs blink patterns'
+            ),
+            _buildStepItem(
+              context, 
+              '5', 
+              'Pattern recognition identifies suspicious behavior'
+            ),
+          ],
         ),
       ),
     );
   }
-  
-  Widget _buildFeatureCard(BuildContext context, {
-    required IconData icon,
-    required String title,
-    required String description,
-  }) {
-    return Card(
-      margin: EdgeInsets.only(bottom: 15),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      color: Colors.white.withOpacity(0.1),
-      child: Padding(
-        padding: EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                icon,
-                color: Colors.white,
-                size: 24,
+
+  Widget _buildStepItem(BuildContext context, String number, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                number,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onPrimary,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-            SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  SizedBox(height: 5),
-                  Text(
-                    description,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.white70,
-                    ),
-                  ),
-                ],
-              ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodyLarge,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
