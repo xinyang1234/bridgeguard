@@ -6,7 +6,7 @@ import 'package:image/image.dart' as img;
 
 class YoloService {
   // Model file paths
-  static const String _modelPath = 'assets/yolov8n.tflite';
+  static const String _modelPath = 'assets/models/yolov8n_float32.tflite';
   static const String _labelsPath = 'assets/labels.txt';
   
   // TFLite model
