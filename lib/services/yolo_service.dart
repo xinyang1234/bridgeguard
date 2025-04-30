@@ -19,10 +19,11 @@ class YoloService {
   final int _modelChannels = 3;
   
   // Output configuration for YOLOv8n
-  late List<List<List<double>>> _outputBoxes;
-  late List<List<double>> _outputScores;
-  late List<List<double>> _outputClasses;
-  late List<double> _outputCount;
+  // Using dynamic allocation to handle different model structures
+  List<List<List<double>>>? _outputTensor;
+  
+  // Eye class index in labels
+  int _eyeClassIndex = -1;
   
   // Confidence threshold
   final double _confidenceThreshold = 0.5;
@@ -30,6 +31,8 @@ class YoloService {
   // Initialize model
   Future<void> loadModel() async {
     try {
+      print('Loading YOLOv8 model...');
+      
       // Load model
       final interpreterOptions = InterpreterOptions()
         ..threads = 4
@@ -41,36 +44,51 @@ class YoloService {
         options: interpreterOptions,
       );
       
-      // Load labels
-      final labelsData = await rootBundle.loadString(_labelsPath);
-      _labels = labelsData.split('\n');
-      
-      // Initialize output tensors
-      _outputBoxes = List.generate(
-        1, // Batch size
-        (_) => List.generate(
-          100, // Max detections
-          (_) => List.generate(4, (_) => 0.0), // [x, y, w, h]
-        ),
-      );
-      
-      _outputScores = List.generate(
-        1, // Batch size
-        (_) => List.generate(100, (_) => 0.0), // Max detections
-      );
-      
-      _outputClasses = List.generate(
-        1, // Batch size
-        (_) => List.generate(100, (_) => 0.0), // Max detections
-      );
-      
-      _outputCount = List.generate(1, (_) => 0.0);
+      // Get model input and output shapes for debugging
+      final inputTensors = _interpreter!.getInputTensors();
+      final outputTensors = _interpreter!.getOutputTensors();
       
       print('YOLOv8 model loaded successfully');
+      print('Input shape: ${inputTensors.map((t) => t.shape).toList()}');
+      print('Output shape: ${outputTensors.map((t) => t.shape).toList()}');
+      
+      // Load labels
+      final labelsData = await rootBundle.loadString(_labelsPath);
+      _labels = labelsData.split('\n')
+          .where((label) => label.trim().isNotEmpty)
+          .toList();
+      
+      print('Labels loaded: ${_labels!.length} labels');
+      
+      // Find eye class index
+      _eyeClassIndex = _labels!.indexWhere(
+        (label) => label.trim().toLowerCase() == 'eye'
+      );
+      
+      print('Eye class index: $_eyeClassIndex');
+      
+      // Initialize output tensor with a simpler approach
+      // This avoids the cast error by using a more direct tensor creation
+      _initializeOutputTensor();
+      
     } catch (e) {
       print('Error loading model: $e');
       rethrow;
     }
+  }
+  
+  // Initialize output tensor based on model output shape
+  void _initializeOutputTensor() {
+    // For YOLOv8, we'll use a safe approach with a 3D tensor
+    _outputTensor = List.generate(
+      1, // Batch size
+      (_) => List.generate(
+        84, // 4 coordinates + 80 classes
+        (_) => List.generate(8400, (_) => 0.0), // 8400 potential detections
+      ),
+    );
+    
+    print('Output tensor initialized with shape: [1, 84, 8400]');
   }
   
   // Detect objects in image
@@ -94,32 +112,25 @@ class YoloService {
         height: _modelInputHeight,
       );
       
-      // Convert to float32 tensor
+      // Convert to input tensor
       final inputTensor = _imageToTensor(preprocessedImage);
       
-      // Define output shapes
-      final outputMap = {
-        0: _outputBoxes,
-        1: _outputScores,
-        2: _outputClasses,
-        3: _outputCount,
-      };
+      // Run inference with simplified approach
+      print('Running inference...');
       
-      // Run inference
-      _interpreter!.runForMultipleInputs([inputTensor], outputMap);
+      // Using direct run method to avoid type casting issues
+      _interpreter!.run(inputTensor[0], _outputTensor![0]);
+      
+      print('Inference complete, processing results...');
       
       // Process results
       return _processResults(
         image.width,
         image.height,
-        _outputBoxes[0],
-        _outputScores[0],
-        _outputClasses[0],
-        _outputCount[0].toInt(),
       );
     } catch (e) {
       print('Error during object detection: $e');
-      return [];
+      rethrow;
     }
   }
   
@@ -156,57 +167,80 @@ class YoloService {
   List<Map<String, dynamic>> _processResults(
     int imageWidth,
     int imageHeight,
-    List<List<double>> boxes,
-    List<double> scores,
-    List<double> classes,
-    int count,
   ) {
     final List<Map<String, dynamic>> detections = [];
     
-    for (int i = 0; i < count; i++) {
-      if (scores[i] < _confidenceThreshold) continue;
+    try {
+      print('Processing YOLOv8 results...');
       
-      final classId = classes[i].toInt();
-      final className = _labels != null && classId < _labels!.length
-          ? _labels![classId]
-          : 'Unknown';
+      // Process each potential detection
+      for (int i = 0; i < 8400; i++) {
+        // Get box coordinates (first 4 values)
+        final x = _outputTensor![0][0][i];
+        final y = _outputTensor![0][1][i];
+        final w = _outputTensor![0][2][i];
+        final h = _outputTensor![0][3][i];
+        
+        // Find highest class confidence
+        double maxScore = 0.0;
+        int classId = -1;
+        
+        // Check all class scores (indices 4 to 83)
+        for (int c = 0; c < 80; c++) {
+          final score = _outputTensor![0][c + 4][i];
+          if (score > maxScore) {
+            maxScore = score;
+            classId = c;
+          }
+        }
+        
+        // Filter by confidence and class (if eye class is found, only keep eye detections)
+        if (maxScore >= _confidenceThreshold && 
+            (_eyeClassIndex == -1 || classId == _eyeClassIndex)) {
+          
+          // Convert normalized coordinates to image coordinates
+          final xmin = ((x - w / 2) * imageWidth).toInt();
+          final ymin = ((y - h / 2) * imageHeight).toInt();
+          final xmax = ((x + w / 2) * imageWidth).toInt();
+          final ymax = ((y + h / 2) * imageHeight).toInt();
+          
+          // Clamp values to image boundaries
+          final safeXmin = xmin.clamp(0, imageWidth - 1);
+          final safeYmin = ymin.clamp(0, imageHeight - 1);
+          final safeXmax = xmax.clamp(0, imageWidth - 1);
+          final safeYmax = ymax.clamp(0, imageHeight - 1);
+          
+          // Only add if box is valid
+          if (safeXmax > safeXmin && safeYmax > safeYmin) {
+            detections.add({
+              'class': _eyeClassIndex != -1 ? 'eye' : 
+                       (_labels != null && classId < _labels!.length ? 
+                        _labels![classId] : 'unknown'),
+              'confidence': maxScore,
+              'box': {
+                'xmin': safeXmin,
+                'ymin': safeYmin,
+                'xmax': safeXmax,
+                'ymax': safeYmax,
+                'width': (safeXmax - safeXmin),
+                'height': (safeYmax - safeYmin),
+              },
+              'landmarks': _estimateEyeLandmarks(safeXmin, safeYmin, safeXmax, safeYmax),
+            });
+          }
+        }
+      }
       
-      // We're only interested in eye detections
-      if (className.toLowerCase() != 'eye') continue;
+      print('Found ${detections.length} detections');
+      return detections;
       
-      // YOLOv8 outputs [x_center, y_center, width, height]
-      final x = boxes[i][0];
-      final y = boxes[i][1];
-      final w = boxes[i][2];
-      final h = boxes[i][3];
-      
-      // Convert normalized coordinates to actual image coordinates
-      final xmin = ((x - w / 2) * imageWidth).toInt();
-      final ymin = ((y - h / 2) * imageHeight).toInt();
-      final xmax = ((x + w / 2) * imageWidth).toInt();
-      final ymax = ((y + h / 2) * imageHeight).toInt();
-      
-      detections.add({
-        'class': className,
-        'confidence': scores[i],
-        'box': {
-          'xmin': xmin,
-          'ymin': ymin,
-          'xmax': xmax,
-          'ymax': ymax,
-          'width': (xmax - xmin),
-          'height': (ymax - ymin),
-        },
-        // Add eye landmarks (simplified for this example)
-        'landmarks': _estimateEyeLandmarks(xmin, ymin, xmax, ymax),
-      });
+    } catch (e) {
+      print('Error processing results: $e');
+      return [];
     }
-    
-    return detections;
   }
   
   // Estimate eye landmarks based on bounding box
-  // In a real implementation, you would use a specialized landmark detection model
   List<Map<String, int>> _estimateEyeLandmarks(int xmin, int ymin, int xmax, int ymax) {
     final int width = xmax - xmin;
     final int height = ymax - ymin;

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
+import 'dart:io';
 import '../widgets/camera_view.dart';
 import '../widgets/result_display.dart';
 import '../models/blink_detection.dart';
@@ -23,6 +24,7 @@ class _DetectionScreenState extends State<DetectionScreen>
   List<CameraDescription>? _cameras;
   bool _isDetecting = false;
   bool _isInitialized = false;
+  bool _isProcessing = false; // Untuk mencegah pemrosesan bersamaan
   int _selectedCameraIndex = 0;
   final YoloService _yoloService = YoloService();
   final utils.EARCalculator _earCalculator = utils.EARCalculator();
@@ -30,6 +32,10 @@ class _DetectionScreenState extends State<DetectionScreen>
   final AnomalyDetection _anomalyDetection = AnomalyDetection();
   List<Map<String, dynamic>> _blinkEvents = [];
   bool _isModelLoaded = false;
+  
+  // Debug information
+  String _debugInfo = "Waiting for model";
+  String _lastError = "";
 
   Timer? _processingTimer;
 
@@ -46,8 +52,13 @@ class _DetectionScreenState extends State<DetectionScreen>
       await _yoloService.loadModel();
       setState(() {
         _isModelLoaded = true;
+        _debugInfo = "Model loaded successfully";
       });
     } catch (e) {
+      setState(() {
+        _lastError = e.toString();
+        _debugInfo = "Failed to load model";
+      });
       debugPrint('Failed to load model: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,8 +116,10 @@ class _DetectionScreenState extends State<DetectionScreen>
   void _startDetection() {
     if (_cameraController != null && _isModelLoaded) {
       _processingTimer =
-          Timer.periodic(const Duration(milliseconds: 100), (timer) {
-        _processFrame();
+          Timer.periodic(const Duration(milliseconds: 500), (timer) {
+        if (!_isProcessing) {
+          _processFrame();
+        }
       });
     } else {
       if (mounted) {
@@ -127,14 +140,39 @@ class _DetectionScreenState extends State<DetectionScreen>
       return;
     }
 
+    // Set flag to prevent concurrent processing
+    _isProcessing = true;
+    
     try {
+      setState(() {
+        _debugInfo = "Capturing image...";
+      });
+      
       final image = await _cameraController!.takePicture();
+      
+      setState(() {
+        _debugInfo = "Processing with YOLO...";
+      });
 
-      // Process with YOLO
+      // Process with YOLO - this is the part that had issues
       final detectionResults = await _yoloService.detectObjects(image.path);
+      
+      setState(() {
+        _debugInfo = "YOLO found ${detectionResults.length} eye detections";
+      });
+
+      // Log detections for debugging
+      if (detectionResults.isNotEmpty) {
+        print("Eye detections: ${detectionResults.length}");
+        print("First detection confidence: ${detectionResults.first['confidence']}");
+      }
 
       // Calculate EAR
       final earValue = _earCalculator.calculateEAR(detectionResults);
+      
+      setState(() {
+        _debugInfo = "Calculated EAR: ${earValue.toStringAsFixed(3)}";
+      });
 
       // Detect blinks
       final blinkDetected = _blinkDetection.detectBlink(earValue);
@@ -144,6 +182,10 @@ class _DetectionScreenState extends State<DetectionScreen>
         _blinkEvents.add({
           'timestamp': timestamp,
           'ear': earValue,
+        });
+        
+        setState(() {
+          _debugInfo = "BLINK DETECTED! Total: ${_blinkEvents.length}";
         });
 
         // Check for anomalies
@@ -163,8 +205,23 @@ class _DetectionScreenState extends State<DetectionScreen>
 
         setState(() {});
       }
+      
+      // Clean up temporary image file
+      try {
+        await File(image.path).delete();
+      } catch (e) {
+        print("Error deleting temporary file: $e");
+      }
+      
     } catch (e) {
+      setState(() {
+        _lastError = e.toString();
+        _debugInfo = "Error in processing";
+      });
       debugPrint('Error processing frame: $e');
+    } finally {
+      // Reset processing flag
+      _isProcessing = false;
     }
   }
 
@@ -256,6 +313,36 @@ class _DetectionScreenState extends State<DetectionScreen>
                           color: Colors.white),
                       onPressed: _switchCamera,
                     ),
+                  ],
+                ),
+              ),
+
+              // Debug Info
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Status: $_debugInfo',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: Colors.white,
+                      ),
+                    ),
+                    if (_lastError.isNotEmpty)
+                      Text(
+                        'Last error: $_lastError',
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          color: Colors.red.shade300,
+                        ),
+                      ),
                   ],
                 ),
               ),

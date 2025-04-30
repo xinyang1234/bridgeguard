@@ -13,12 +13,24 @@ class EARCalculator {
       return 1.0; // Default value for open eyes
     }
     
+    // Debug log
+    print("Processing ${detections.length} detections for EAR calculation");
+    
     double totalEAR = 0.0;
     int eyeCount = 0;
     
     for (final detection in detections) {
-      if (detection['class'] == 'eye' && detection.containsKey('landmarks')) {
+      // Debug: log detection details
+      print("Detection class: ${detection['class']}, confidence: ${detection['confidence']}");
+      
+      // PERUBAHAN: 
+      // Kita tidak perlu memeriksa 'class' == 'eye' karena YoloService sudah memfilter
+      // hanya untuk deteksi mata, tapi kita tetap memastikan ada landmark
+      if (detection.containsKey('landmarks')) {
         final landmarks = detection['landmarks'] as List<Map<String, int>>;
+        
+        // Debug: log landmark count
+        print("Landmarks count: ${landmarks.length}");
         
         // Ensure we have enough landmarks
         if (landmarks.length >= 6) {
@@ -34,17 +46,25 @@ class EARCalculator {
           final verticalDist1 = _distance(p2, p4); // Top to bottom
           final horizontalDist = _distance(p1, p3); // Left to right
           
+          // Debug: log distances
+          print("Vertical distance: $verticalDist1, Horizontal distance: $horizontalDist");
+          
           // Avoid division by zero
           if (horizontalDist > 0) {
             final ear = verticalDist1 / horizontalDist;
             totalEAR += ear;
             eyeCount++;
+            
+            // Debug: log EAR
+            print("Calculated EAR: $ear");
           }
         }
       }
     }
     
     // Return average EAR if we detected eyes, otherwise default to open eyes
-    return eyeCount > 0 ? totalEAR / eyeCount : 1.0;
+    double finalEAR = eyeCount > 0 ? totalEAR / eyeCount : 1.0;
+    print("Final average EAR: $finalEAR from $eyeCount valid eye detections");
+    return finalEAR;
   }
 }
