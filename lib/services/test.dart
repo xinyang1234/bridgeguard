@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 
 class YoloService {
-  // Model file paths
+  // Model file paths - updated for specific model
   static const String _modelPath = 'assets/models/best_saved_model/best_float32.tflite';
   static const String _labelsPath = 'assets/labels.txt';
   
@@ -15,12 +16,12 @@ class YoloService {
   // Input configuration for detection model
   final int _modelInputWidth = 640;
   final int _modelInputHeight = 640;
-  final int _modelInputChannels = 3;
+  final int _modelChannels = 3;
   
   // Output configuration for detection model
   List<List<List<double>>>? _outputTensor;
   
-  // Class indices
+  // Eye and state class indices
   int _eyeClassIndex = -1;
   int _pupilClassIndex = -1;
   int _drowsyClassIndex = -1;
@@ -45,14 +46,24 @@ class YoloService {
         options: interpreterOptions,
       );
       
-      // Print input and output shapes
+      // Get model input and output shapes for debugging
       final inputTensors = _interpreter!.getInputTensors();
       final outputTensors = _interpreter!.getOutputTensors();
       
       print('Model loaded successfully');
       print('Input shape: ${inputTensors.map((t) => t.shape).toList()}');
       print('Output shape: ${outputTensors.map((t) => t.shape).toList()}');
-      
+      for (int i = 0; i < inputTensors.length; i++) {
+      print('Input Tensor $i:');
+      print('  Shape: ${inputTensors[i].shape}');
+      print('  Type: ${inputTensors[i].type}');
+    }
+    
+    for (int i = 0; i < outputTensors.length; i++) {
+      print('Output Tensor $i:');
+      print('  Shape: ${outputTensors[i].shape}');
+      print('  Type: ${outputTensors[i].type}');
+    }
       // Load labels
       final labelsData = await rootBundle.loadString(_labelsPath);
       _labels = labelsData.split('\n')
@@ -82,7 +93,7 @@ class YoloService {
       print('Awake: $_awakeClassIndex');
       print('Available labels: $_labels');
       
-      // Initialize output tensor based on model output shape
+      // Initialize output tensor 
       _initializeOutputTensor();
       
     } catch (e) {
@@ -91,13 +102,13 @@ class YoloService {
     }
   }
   
-  // Initialize output tensor 
+  // Initialize output tensor based on model output shape
   void _initializeOutputTensor() {
-    // Based on output shape [1, 8, 8400]
+    // Adjust dimensions based on actual model output
     _outputTensor = List.generate(
       1, // Batch size
       (_) => List.generate(
-        8, // Number of output channels/classes
+        84, // Adjust based on your model's output structure
         (_) => List.generate(8400, (_) => 0.0), // Detection count
       ),
     );
@@ -105,7 +116,7 @@ class YoloService {
     print('Output tensor initialized');
   }
   
-  // Detect objects 
+  // Detect objects with model-specific processing
   Future<List<Map<String, dynamic>>> detectObjects(String imagePath) async {
     if (_interpreter == null) {
       throw Exception('Model not loaded');
@@ -126,21 +137,12 @@ class YoloService {
         height: _modelInputHeight,
       );
       
-      // Convert to input tensor 
+      // Convert to input tensor with specific preprocessing
       final inputTensor = _imageToTensor(preprocessedImage);
-      
-      // Prepare output tensor
-      final outputTensor = List.generate(
-        1, 
-        (_) => List.generate(
-          8, 
-          (_) => List.generate(8400, (_) => 0.0)
-        )
-      );
       
       // Run inference
       print('Running inference...');
-      _interpreter!.run(inputTensor, outputTensor);
+      _interpreter!.run(inputTensor, _outputTensor!);
       
       print('Inference complete, processing results...');
       
@@ -148,7 +150,6 @@ class YoloService {
       return _processResults(
         image.width,
         image.height,
-        outputTensor[0],
       );
     } catch (e) {
       print('Error during object detection: $e');
@@ -156,46 +157,42 @@ class YoloService {
     }
   }
   
-  // Convert image to input tensor 
-  List<List<List<List<double>>>> _imageToTensor(img.Image image) {
-    // Create tensor with NHWC format [1, height, width, channels]
-    final tensor = List.generate(
-      1, // Batch size
+  // Convert image to input tensor with specific normalization
+List<List<List<List<double>>>> _imageToTensor(img.Image image) {
+  final tensor = List.generate(
+    1, // Batch size
+    (_) => List.generate(
+      _modelInputHeight,
       (_) => List.generate(
-        _modelInputHeight,
+        _modelInputWidth,
         (_) => List.generate(
-          _modelInputWidth,
-          (_) => List.generate(
-            _modelInputChannels, // Channels last
-            (_) => 0.0,
-          ),
+          _modelChannels, // Pindahkan channel ke akhir
+          (_) => 0.0,
         ),
       ),
-    );
-    
-    // Fill tensor with image data
-    for (int y = 0; y < _modelInputHeight; y++) {
-      for (int x = 0; x < _modelInputWidth; x++) {
-        final pixel = image.getPixel(x, y);
-        
-        // Normalize pixel values
-        tensor[0][y][x][0] = pixel.r / 255.0; // Red channel
-        tensor[0][y][x][1] = pixel.g / 255.0; // Green channel
-        tensor[0][y][x][2] = pixel.b / 255.0; // Blue channel
-      }
+    ),
+  );
+  
+  // Fill tensor dengan urutan [height, width, channels]
+  for (int y = 0; y < _modelInputHeight; y++) {
+    for (int x = 0; x < _modelInputWidth; x++) {
+      final pixel = image.getPixel(x, y);
+      
+      // Normalisasi
+      tensor[0][y][x][0] = pixel.r / 255.0; // Red
+      tensor[0][y][x][1] = pixel.g / 255.0; // Green
+      tensor[0][y][x][2] = pixel.b / 255.0; // Blue
     }
-    
-    // Debug print tensor shape
-    print('Tensor shape: [${tensor.length}, ${tensor[0].length}, ${tensor[0][0].length}, ${tensor[0][0][0].length}]');
-    
-    return tensor;
   }
+  
+  print('Tensor shape: [${tensor.length}, ${tensor[0].length}, ${tensor[0][0].length}, ${tensor[0][0][0].length}]');
+  return tensor;
+}
   
   // Process detection results
   List<Map<String, dynamic>> _processResults(
     int imageWidth,
     int imageHeight,
-    List<List<double>> outputTensor,
   ) {
     final List<Map<String, dynamic>> detections = [];
     
@@ -203,23 +200,20 @@ class YoloService {
       print('Processing detection results...');
       
       // Iterate through potential detections
-      // Struktur output: [8, 8400]
-      // Index 0-3: Box coordinates (x, y, width, height)
-      // Index 4-7: Class confidences
       for (int i = 0; i < 8400; i++) { 
         // Get box coordinates 
-        final x = outputTensor[0][i];
-        final y = outputTensor[1][i];
-        final w = outputTensor[2][i];
-        final h = outputTensor[3][i];
+        final x = _outputTensor![0][0][i];
+        final y = _outputTensor![0][1][i];
+        final w = _outputTensor![0][2][i];
+        final h = _outputTensor![0][3][i];
         
         // Find highest class confidence
         double maxScore = 0.0;
         int classId = -1;
         
-        // Check class confidences (indices 4-7)
-        for (int c = 0; c < 4; c++) {
-          final score = outputTensor[c + 4][i];
+        // Check all class scores 
+        for (int c = 0; c < 80; c++) {
+          final score = _outputTensor![0][c + 4][i];
           if (score > maxScore) {
             maxScore = score;
             classId = c;
