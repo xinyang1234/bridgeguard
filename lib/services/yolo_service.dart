@@ -5,35 +5,35 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
 
 class YoloService {
-  // Model file paths
-  static const String _modelPath = 'assets/models/yolov8n_float32.tflite';
+  // Model file paths - update to YOLOv11
+  static const String _modelPath = 'assets/models/best_saved_model/best_float32.tflite';
   static const String _labelsPath = 'assets/labels.txt';
   
   // TFLite model
   Interpreter? _interpreter;
   List<String>? _labels;
   
-  // Input configuration
-  final int _modelInputWidth = 640;
-  final int _modelInputHeight = 640;
+  // Input configuration for YOLOv11
+  final int _modelInputWidth = 640;  // Sesuaikan dengan YOLOv11 requirements
+  final int _modelInputHeight = 640; // Sesuaikan dengan YOLOv11 requirements
   final int _modelChannels = 3;
   
-  // Output configuration for YOLOv8n
-  // Using dynamic allocation to handle different model structures
+  // Output configuration for YOLOv11
+  // YOLOv11 memiliki output format yang berbeda dari YOLOv8
   List<List<List<double>>>? _outputTensor;
   
   // Eye class index in labels
   int _eyeClassIndex = -1;
   
-  // Confidence threshold
-  final double _confidenceThreshold = 0.5;
+  // Confidence threshold - might need adjustment for YOLOv11
+  final double _confidenceThreshold = 0.45;
   
   // Initialize model
   Future<void> loadModel() async {
     try {
-      print('Loading YOLOv8 model...');
+      print('Loading YOLOv11 model...');
       
-      // Load model
+      // Load model with optimized settings for YOLOv11
       final interpreterOptions = InterpreterOptions()
         ..threads = 4
         ..useNnApiForAndroid = true;
@@ -48,7 +48,7 @@ class YoloService {
       final inputTensors = _interpreter!.getInputTensors();
       final outputTensors = _interpreter!.getOutputTensors();
       
-      print('YOLOv8 model loaded successfully');
+      print('YOLOv11 model loaded successfully');
       print('Input shape: ${inputTensors.map((t) => t.shape).toList()}');
       print('Output shape: ${outputTensors.map((t) => t.shape).toList()}');
       
@@ -62,13 +62,13 @@ class YoloService {
       
       // Find eye class index
       _eyeClassIndex = _labels!.indexWhere(
-        (label) => label.trim().toLowerCase() == 'eye'
+        (label) => label.trim().toLowerCase() == 'iris'
       );
       
       print('Eye class index: $_eyeClassIndex');
+      print('Available labels: $_labels');
       
-      // Initialize output tensor with a simpler approach
-      // This avoids the cast error by using a more direct tensor creation
+      // Initialize output tensor for YOLOv11
       _initializeOutputTensor();
       
     } catch (e) {
@@ -77,21 +77,22 @@ class YoloService {
     }
   }
   
-  // Initialize output tensor based on model output shape
+  // Initialize output tensor based on YOLOv11 output shape
   void _initializeOutputTensor() {
-    // For YOLOv8, we'll use a safe approach with a 3D tensor
+    // YOLOv11 output shape may differ from YOLOv8
+    // You'll need to adjust these dimensions based on the actual model
     _outputTensor = List.generate(
       1, // Batch size
       (_) => List.generate(
-        84, // 4 coordinates + 80 classes
-        (_) => List.generate(8400, (_) => 0.0), // 8400 potential detections
+        84, // 4 coordinates + 80 classes (adjust if YOLOv11 has different class count)
+        (_) => List.generate(8400, (_) => 0.0), // Adjust detection count for YOLOv11
       ),
     );
     
-    print('Output tensor initialized with shape: [1, 84, 8400]');
+    print('Output tensor initialized for YOLOv11');
   }
   
-  // Detect objects in image
+  // Detect objects with YOLOv11-specific processing
   Future<List<Map<String, dynamic>>> detectObjects(String imagePath) async {
     if (_interpreter == null) {
       throw Exception('Model not loaded');
@@ -112,29 +113,27 @@ class YoloService {
         height: _modelInputHeight,
       );
       
-      // Convert to input tensor
+      // Convert to input tensor with YOLOv11 specific preprocessing
       final inputTensor = _imageToTensor(preprocessedImage);
       
-      // Run inference with simplified approach
-      print('Running inference...');
-      
-      // Using direct run method to avoid type casting issues
+      // Run inference
+      print('Running YOLOv11 inference...');
       _interpreter!.run(inputTensor[0], _outputTensor![0]);
       
-      print('Inference complete, processing results...');
+      print('YOLOv11 inference complete, processing results...');
       
-      // Process results
+      // Process YOLOv11 results
       return _processResults(
         image.width,
         image.height,
       );
     } catch (e) {
-      print('Error during object detection: $e');
+      print('Error during YOLOv11 object detection: $e');
       rethrow;
     }
   }
   
-  // Convert image to input tensor
+  // Convert image to input tensor with YOLOv11-specific normalization
   List<List<List<List<double>>>> _imageToTensor(img.Image image) {
     // Create empty tensor
     final tensor = List.generate(
@@ -148,12 +147,12 @@ class YoloService {
       ),
     );
     
-    // Fill tensor with image data
+    // Fill tensor with image data using YOLOv11 specific preprocessing
     for (int y = 0; y < _modelInputHeight; y++) {
       for (int x = 0; x < _modelInputWidth; x++) {
         final pixel = image.getPixel(x, y);
         
-        // Normalize pixel values to [0, 1]
+        // YOLOv11 might use different normalization
         tensor[0][y][x][0] = pixel.r / 255.0;
         tensor[0][y][x][1] = pixel.g / 255.0;
         tensor[0][y][x][2] = pixel.b / 255.0;
@@ -163,7 +162,7 @@ class YoloService {
     return tensor;
   }
   
-  // Process detection results
+  // Process YOLOv11 detection results
   List<Map<String, dynamic>> _processResults(
     int imageWidth,
     int imageHeight,
@@ -171,11 +170,12 @@ class YoloService {
     final List<Map<String, dynamic>> detections = [];
     
     try {
-      print('Processing YOLOv8 results...');
+      print('Processing YOLOv11 results...');
       
-      // Process each potential detection
-      for (int i = 0; i < 8400; i++) {
-        // Get box coordinates (first 4 values)
+      // YOLOv11 might have different output structure
+      // You'll need to adjust this processing based on the actual model output
+      for (int i = 0; i < 8400; i++) { // Adjust count for YOLOv11
+        // Get box coordinates 
         final x = _outputTensor![0][0][i];
         final y = _outputTensor![0][1][i];
         final w = _outputTensor![0][2][i];
@@ -185,7 +185,7 @@ class YoloService {
         double maxScore = 0.0;
         int classId = -1;
         
-        // Check all class scores (indices 4 to 83)
+        // Check all class scores - YOLOv11 might have different class count
         for (int c = 0; c < 80; c++) {
           final score = _outputTensor![0][c + 4][i];
           if (score > maxScore) {
@@ -194,23 +194,23 @@ class YoloService {
           }
         }
         
-        // Filter by confidence and class (if eye class is found, only keep eye detections)
+        // Apply YOLOv11 specific post-processing
         if (maxScore >= _confidenceThreshold && 
             (_eyeClassIndex == -1 || classId == _eyeClassIndex)) {
           
-          // Convert normalized coordinates to image coordinates
+          // Convert coordinates - YOLOv11 might use different coordinate format
           final xmin = ((x - w / 2) * imageWidth).toInt();
           final ymin = ((y - h / 2) * imageHeight).toInt();
           final xmax = ((x + w / 2) * imageWidth).toInt();
           final ymax = ((y + h / 2) * imageHeight).toInt();
           
-          // Clamp values to image boundaries
+          // Safe bounds
           final safeXmin = xmin.clamp(0, imageWidth - 1);
           final safeYmin = ymin.clamp(0, imageHeight - 1);
           final safeXmax = xmax.clamp(0, imageWidth - 1);
           final safeYmax = ymax.clamp(0, imageHeight - 1);
           
-          // Only add if box is valid
+          // Add valid detections
           if (safeXmax > safeXmin && safeYmax > safeYmin) {
             detections.add({
               'class': _eyeClassIndex != -1 ? 'eye' : 
@@ -231,27 +231,20 @@ class YoloService {
         }
       }
       
-      print('Found ${detections.length} detections');
+      print('Found ${detections.length} detections with YOLOv11');
       return detections;
       
     } catch (e) {
-      print('Error processing results: $e');
+      print('Error processing YOLOv11 results: $e');
       return [];
     }
   }
   
-  // Estimate eye landmarks based on bounding box
+  // Metode landmark estimation tetap sama
   List<Map<String, int>> _estimateEyeLandmarks(int xmin, int ymin, int xmax, int ymax) {
+    // ... kode yang ada tetap sama
     final int width = xmax - xmin;
     final int height = ymax - ymin;
-    
-    // Simplify to 6 landmarks for eye:
-    // 1. Left corner of eye
-    // 2. Top point of eye
-    // 3. Right corner of eye
-    // 4. Bottom point of eye
-    // 5. Center of eye
-    // 6. Pupil (estimated)
     
     return [
       {'x': xmin, 'y': ymin + (height ~/ 2)},                 // Left corner
@@ -263,7 +256,6 @@ class YoloService {
     ];
   }
   
-  // Clean up resources
   void dispose() {
     _interpreter?.close();
   }

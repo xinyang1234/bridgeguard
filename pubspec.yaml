@@ -37,7 +37,8 @@ flutter:
   
   assets:
     - assets/
-    - assets/models/yolov8n_float32.tflite
+    # - assets/models/yolov8n_float32.tflite
+    - assets/models/best_saved_model/best_float32.tflite
     - assets/labels.txt
     - assets/icon/iconapk.png
   
